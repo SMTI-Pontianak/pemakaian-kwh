@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Pemakaian KWH - SMTI Pontianak (Live)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#161d2e; --panel2:#1c2438; --border:#28324a;
+    --text:#e8ecf5; --muted:#8f9bb8; --accent1:#4fd1c5; --accent2:#f6ad55;
+    --accent1-soft: rgba(79,209,197,0.15); --accent2-soft: rgba(246,173,85,0.15);
+    --good:#68d391; --bad:#fc8181;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: radial-gradient(circle at 20% 0%, #182236 0%, var(--bg) 55%);
+    color:var(--text); padding:24px; min-height:100vh;
+  }
+  .wrap{max-width:1100px; margin:0 auto;}
+  header{margin-bottom:18px; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;}
+  header h1{font-size:1.5rem; margin:0 0 4px 0; font-weight:700; letter-spacing:.2px;}
+  header p{margin:0; color:var(--muted); font-size:.9rem;}
+  .live-dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--good); margin-right:6px; box-shadow:0 0 8px var(--good); animation:pulse 1.6s infinite;}
+  .live-dot.syncing{background:var(--accent2); box-shadow:0 0 8px var(--accent2);}
+  @keyframes pulse{0%{opacity:1;}50%{opacity:.35;}100%{opacity:1;}}
+  .sync-badge{font-size:.78rem; color:var(--muted); background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 12px; display:flex; align-items:center; gap:8px; white-space:nowrap;}
+  .sync-badge button{background:transparent; border:1px solid var(--border); color:var(--text); border-radius:7px; padding:4px 9px; font-size:.72rem; cursor:pointer;}
+  .sync-badge button:hover{border-color:var(--accent1);}
+
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px;}
+  .kpi{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px 16px;}
+  .kpi .label{font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;}
+  .kpi .value{font-size:1.4rem; font-weight:700;}
+  .kpi .sub{font-size:.75rem; color:var(--muted); margin-top:2px;}
+  .kpi.m1 .value{color:var(--accent1);}
+  .kpi.m2 .value{color:var(--accent2);}
+
+  .controls{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; justify-content:space-between;}
+  .controls-left{display:flex; gap:10px; flex-wrap:wrap;}
+  .tabs{display:flex; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:4px; gap:4px;}
+  .tabs button{border:none; background:transparent; color:var(--muted); padding:8px 16px; border-radius:9px; font-size:.85rem; font-weight:600; cursor:pointer; transition:.15s;}
+  .tabs button.active{background:linear-gradient(135deg,var(--accent1),#38b2ac); color:#08211f;}
+  .meter-toggle{display:flex; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:4px; gap:4px;}
+  .meter-toggle button{border:none; background:transparent; color:var(--muted); padding:8px 14px; border-radius:9px; font-size:.85rem; font-weight:600; cursor:pointer; transition:.15s;}
+  .meter-toggle button.active.m1{background:var(--accent1-soft); color:var(--accent1);}
+  .meter-toggle button.active.m2{background:var(--accent2-soft); color:var(--accent2);}
+  .meter-toggle button.active.both{background:#2b3350; color:var(--text);}
+  .add-btn{background:linear-gradient(135deg,var(--accent2),#dd8a3a); border:none; color:#2a1a05; font-weight:700; padding:10px 16px; border-radius:10px; cursor:pointer; font-size:.85rem;}
+  .add-btn:hover{filter:brightness(1.05);}
+
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px; margin-bottom:18px;}
+  .panel .title{font-size:.95rem; font-weight:700; margin-bottom:2px;}
+  .panel .desc{font-size:.78rem; color:var(--muted); margin-bottom:14px;}
+  .chart-holder{position:relative; height:340px;}
+
+  .note{background:var(--panel2); border:1px dashed var(--border); border-radius:10px; padding:10px 14px; font-size:.78rem; color:var(--muted); margin-bottom:18px;}
+  .note b{color:var(--text);}
+  footer{color:var(--muted); font-size:.72rem; text-align:center; margin-top:10px; padding-bottom:10px;}
+
+  .modal-overlay{position:fixed; inset:0; background:rgba(5,8,15,0.65); display:none; align-items:center; justify-content:center; z-index:50; padding:16px;}
+  .modal-overlay.open{display:flex;}
+  .modal{background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:22px; width:100%; max-width:380px;}
+  .modal h3{margin:0 0 14px 0; font-size:1.05rem;}
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:.78rem; color:var(--muted); margin-bottom:5px;}
+  .field input, .field select{
+    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:9px 10px; border-radius:8px; font-size:.9rem; font-family:inherit;
+  }
+  .field input:focus, .field select:focus{outline:none; border-color:var(--accent1);}
+  .modal-actions{display:flex; gap:8px; margin-top:16px;}
+  .modal-actions button{flex:1; padding:10px; border-radius:9px; font-size:.85rem; font-weight:600; cursor:pointer; border:none;}
+  .btn-cancel{background:var(--panel2); color:var(--muted); border:1px solid var(--border) !important;}
+  .btn-submit{background:linear-gradient(135deg,var(--accent1),#38b2ac); color:#08211f;}
+  .form-msg{font-size:.78rem; margin-top:8px; min-height:16px;}
+  .form-msg.err{color:var(--bad);}
+  .form-msg.ok{color:var(--good);}
+
+  .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--panel); border:1px solid var(--accent1); color:var(--text); padding:10px 18px; border-radius:10px; font-size:.82rem; opacity:0; transition:.3s; pointer-events:none; z-index:60;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>⚡ Pemakaian Listrik KWH — SMTI Pontianak</h1>
+      <p><span class="live-dot" id="liveDot"></span>Live · tersinkron via Google Sheets ke semua orang yang membuka dashboard ini</p>
+    </div>
+    <div class="sync-badge">
+      <span id="syncText">tersinkron baru saja</span>
+      <button id="refreshBtn">Segarkan</button>
+    </div>
+  </header>
+
+  <div class="note">Meteran 1 diganti pada <b>6 Agustus 2026</b> (pemakaian hari itu 0 kWh karena pergantian alat) — data lama & baru sudah disambung. Klik "Impor Excel" untuk memuat data historis pertama kali; pembacaan baru yang ditambahkan di sini tersimpan ke Google Sheet dan terlihat oleh siapa pun yang membuka dashboard ini dalam beberapa detik.</div>
+
+  <div class="kpis" id="kpis"><div class="kpi"><div class="label">Memuat…</div><div class="value">—</div></div></div>
+
+  <div class="controls">
+    <div class="controls-left">
+      <div class="tabs" id="tabs">
+        <button data-view="daily" class="active">Harian</button>
+        <button data-view="weekly">Mingguan</button>
+        <button data-view="monthly">Bulanan</button>
+      </div>
+      <div class="meter-toggle" id="meterToggle">
+        <button data-meter="both" class="active both">Kedua Meteran</button>
+        <button data-meter="Meteran 1" class="m1">Meteran 1</button>
+        <button data-meter="Meteran 2" class="m2">Meteran 2</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="add-btn" id="importBtn" style="background:linear-gradient(135deg,#4fd1c5,#38b2ac); color:#08211f;">⤒ Impor Excel</button>
+      <button class="add-btn" id="openModalBtn">+ Tambah Pembacaan</button>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none;">
+  </div>
+
+  <div class="panel">
+    <div class="title" id="chartTitle">Pemakaian Harian (kWh)</div>
+    <div class="desc" id="chartDesc">Memuat data…</div>
+    <div class="chart-holder"><canvas id="mainChart"></canvas></div>
+  </div>
+
+  <footer>Data tersimpan di Google Sheet Anda sendiri · setiap pembacaan baru terlihat oleh semua pengguna dashboard ini dalam beberapa detik</footer>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3>Tambah Pembacaan Meteran</h3>
+    <div class="field">
+      <label>Tanggal</label>
+      <input type="date" id="fDate">
+    </div>
+    <div class="field">
+      <label>Meteran</label>
+      <select id="fMeter">
+        <option value="Meteran 1">Meteran 1</option>
+        <option value="Meteran 2">Meteran 2</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Pemakaian (kWh)</label>
+      <input type="number" step="0.01" id="fUsage" placeholder="mis. 3.25">
+    </div>
+    <div class="form-msg" id="formMsg"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelBtn">Batal</button>
+      <button class="btn-submit" id="submitBtn">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="importOverlay">
+  <div class="modal" style="max-width:440px;">
+    <h3>Impor dari Excel</h3>
+    <div id="importSummary" style="font-size:.85rem; color:var(--muted); margin-bottom:12px;"></div>
+    <div id="importPreview" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:12px; display:none;">
+      <table style="width:100%; border-collapse:collapse; font-size:.78rem;">
+        <thead><tr style="text-align:left; color:var(--muted);">
+          <th style="padding:6px 8px;">Tanggal</th><th style="padding:6px 8px;">Meteran</th><th style="padding:6px 8px;">kWh</th>
+        </tr></thead>
+        <tbody id="importPreviewBody"></tbody>
+      </table>
+    </div>
+    <div class="field">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" id="importOverwrite" checked style="width:auto;">
+        Timpa pembacaan yang tanggal & meterannya sama
+      </label>
+    </div>
+    <div class="form-msg" id="importMsg"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="importCancelBtn">Batal</button>
+      <button class="btn-submit" id="importConfirmBtn">Impor</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ==== CONFIG: paste your Google Apps Script Web App URL here (ends in /exec) ====
+const API_URL = 'https://script.google.com/macros/s/AKfycbxDad7B0ULJbFTwpd2OG9nUTcHMDwXCkXLvrrigYGlkWaynXo6ZFYYQ29Zwch0ms7cf/exec';
+// =================================================================================
+const POLL_MS = 6000;
+
+let raw = [];
+let state = { view:'daily', meter:'both' };
+let chart = null;
+let lastSyncTime = null;
+const API_READY = !!API_URL;
+
+// ---------- backend (Google Sheets via Apps Script) ----------
+async function apiGet(){
+  const res = await fetch(API_URL, { method:'GET' });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const body = await res.json();
+  if(!body.ok) throw new Error(body.error || 'Respons API tidak valid');
+  return body.records || [];
+}
+
+async function apiUpsert(records, overwrite){
+  // text/plain avoids a CORS preflight against Apps Script, which otherwise rejects it
+  const res = await fetch(API_URL, {
+    method:'POST',
+    headers: { 'Content-Type':'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action:'upsert', records, overwrite })
+  });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const body = await res.json();
+  if(!body.ok) throw new Error(body.error || 'Gagal menyimpan ke Sheet');
+  return body;
+}
+
+async function loadFromStorage(){
+  if(!API_READY) return;
+  raw = await apiGet();
+}
+
+async function saveRecords(records, overwrite, retries=1){
+  try{
+    await apiUpsert(records, overwrite);
+  }catch(err){
+    if(retries > 0){
+      await new Promise(r=>setTimeout(r, 600));
+      return saveRecords(records, overwrite, retries-1);
+    }
+    throw err;
+  }
+}
+
+function setSyncing(on){
+  document.getElementById('liveDot').classList.toggle('syncing', on);
+}
+
+function updateSyncText(){
+  if(!API_READY){ document.getElementById('syncText').textContent = 'belum terhubung'; return; }
+  if(!lastSyncTime) return;
+  const secs = Math.round((Date.now() - lastSyncTime)/1000);
+  document.getElementById('syncText').textContent = secs < 2 ? 'tersinkron baru saja' : `tersinkron ${secs}d lalu`;
+}
+setInterval(updateSyncText, 1000);
+
+async function pollLoop(){
+  if(!API_READY) return;
+  while(true){
+    await new Promise(r=>setTimeout(r, POLL_MS));
+    try{
+      setSyncing(true);
+      const fresh = await apiGet();
+      if(JSON.stringify(fresh) !== JSON.stringify(raw)){
+        raw = fresh;
+        computeKpis();
+        render();
+        showToast('Data baru diterima');
+      }
+      lastSyncTime = Date.now();
+    }catch(e){ console.error('poll error', e); }
+    finally{ setSyncing(false); }
+  }
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+// ---------- date helpers ----------
+function isoWeek(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  const target = new Date(d.valueOf());
+  const dayNr = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = new Date(target.getFullYear(),0,4);
+  const diff = (target - firstThursday) / 86400000;
+  const week = 1 + Math.floor(diff/7);
+  return `${target.getFullYear()}-W${String(week).padStart(2,'0')}`;
+}
+function weekLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  const dayNr = (d.getDay()+6)%7;
+  const monday = new Date(d); monday.setDate(d.getDate()-dayNr);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+  const fmt = x => x.toLocaleDateString('id-ID',{day:'2-digit',month:'short'});
+  return `${fmt(monday)} – ${fmt(sunday)}`;
+}
+function monthLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('id-ID',{month:'long',year:'numeric'});
+}
+function dayLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short'});
+}
+
+const METERS = ['Meteran 1','Meteran 2'];
+const COLORS = {'Meteran 1':'#4fd1c5','Meteran 2':'#f6ad55'};
+
+function aggregate(view, meterFilter){
+  const groups = {};
+  const order = [];
+  const keyFor = r => view==='daily' ? r.date : view==='weekly' ? isoWeek(r.date) : r.date.slice(0,7);
+  const labelFor = r => view==='daily' ? dayLabel(r.date) : view==='weekly' ? weekLabel(r.date) : monthLabel(r.date);
+
+  raw.forEach(r=>{
+    if(meterFilter!=='both' && r.meter!==meterFilter) return;
+    const k = keyFor(r);
+    if(!groups[k]){ groups[k] = {label:labelFor(r), sortKey:k, 'Meteran 1':0, 'Meteran 2':0}; order.push(k); }
+    groups[k][r.meter] += r.usage;
+  });
+  const keys = [...new Set(order)].sort();
+  return keys.map(k=>groups[k]);
+}
+
+function computeKpis(){
+  const totals = {'Meteran 1':0,'Meteran 2':0};
+  const days = {'Meteran 1':new Set(),'Meteran 2':new Set()};
+  raw.forEach(r=>{ totals[r.meter]+=r.usage; days[r.meter].add(r.date); });
+  const html = METERS.map(m=>{
+    const avg = days[m].size ? totals[m]/days[m].size : 0;
+    const cls = m==='Meteran 1'?'m1':'m2';
+    return `<div class="kpi ${cls}">
+      <div class="label">${m} · Total</div>
+      <div class="value">${totals[m].toFixed(1)} kWh</div>
+      <div class="sub">rata-rata ${avg.toFixed(2)} kWh/hari · ${days[m].size} hari tercatat</div>
+    </div>`;
+  }).join('');
+  document.getElementById('kpis').innerHTML = html + `
+    <div class="kpi">
+      <div class="label">Total Gabungan</div>
+      <div class="value">${(totals['Meteran 1']+totals['Meteran 2']).toFixed(1)} kWh</div>
+      <div class="sub">Meteran 1 + Meteran 2 · ${raw.length} pembacaan</div>
+    </div>`;
+}
+
+function render(){
+  const view = state.view, meter = state.meter;
+  const data = aggregate(view, meter);
+  const labels = data.map(d=>d.label);
+
+  let datasets;
+  if(meter==='both'){
+    datasets = METERS.map(m=>({
+      label:m, data:data.map(d=>Math.round(d[m]*100)/100),
+      backgroundColor: COLORS[m], borderRadius:6, maxBarThickness:36
+    }));
+  } else {
+    datasets = [{
+      label:meter, data:data.map(d=>Math.round(d[meter]*100)/100),
+      backgroundColor: COLORS[meter], borderRadius:6, maxBarThickness:36
+    }];
+  }
+
+  const titleMap = {daily:'Pemakaian Harian (kWh)', weekly:'Pemakaian Mingguan (kWh)', monthly:'Pemakaian Bulanan (kWh)'};
+  const descMap = {
+    daily:'Konsumsi listrik per hari',
+    weekly:'Konsumsi listrik dijumlahkan per minggu (Senin–Minggu)',
+    monthly:'Konsumsi listrik dijumlahkan per bulan'
+  };
+  document.getElementById('chartTitle').textContent = titleMap[view];
+  document.getElementById('chartDesc').textContent = descMap[view] + (meter==='both' ? '' : ` — ${meter}`);
+
+  const ctx = document.getElementById('mainChart').getContext('2d');
+  if(chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation:{ duration:500, easing:'easeOutQuart' },
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display: meter==='both', labels:{ color:'#e8ecf5', usePointStyle:true, boxWidth:8 } },
+        tooltip:{
+          backgroundColor:'#1c2438', borderColor:'#28324a', borderWidth:1, padding:10,
+          titleColor:'#e8ecf5', bodyColor:'#c8d0e3',
+          callbacks:{ label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kWh` }
+        }
+      },
+      scales:{
+        x:{ ticks:{ color:'#8f9bb8', maxRotation:45, minRotation:0 }, grid:{ color:'rgba(255,255,255,0.04)' } },
+        y:{ ticks:{ color:'#8f9bb8' }, grid:{ color:'rgba(255,255,255,0.06)' }, title:{ display:true, text:'kWh', color:'#8f9bb8' } }
+      }
+    }
+  });
+}
+
+// ---------- controls ----------
+document.getElementById('tabs').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  state.view = btn.dataset.view;
+  render();
+});
+document.getElementById('meterToggle').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  document.querySelectorAll('#meterToggle button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  state.meter = btn.dataset.meter;
+  render();
+});
+document.getElementById('refreshBtn').addEventListener('click', async ()=>{
+  if(!API_READY){ showToast('Belum terhubung ke Google Sheet'); return; }
+  setSyncing(true);
+  try{
+    await loadFromStorage();
+    computeKpis(); render();
+    lastSyncTime = Date.now();
+    showToast('Disegarkan');
+  }catch(e){
+    console.error(e);
+    showToast('Gagal menyegarkan: ' + (e.message || e));
+  }
+  setSyncing(false);
+});
+
+// ---------- modal / form ----------
+const overlay = document.getElementById('modalOverlay');
+document.getElementById('openModalBtn').addEventListener('click', ()=>{
+  document.getElementById('fDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('fUsage').value = '';
+  document.getElementById('formMsg').textContent = '';
+  document.getElementById('formMsg').className = 'form-msg';
+  overlay.classList.add('open');
+});
+document.getElementById('cancelBtn').addEventListener('click', ()=> overlay.classList.remove('open'));
+overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.classList.remove('open'); });
+
+document.getElementById('submitBtn').addEventListener('click', async ()=>{
+  const date = document.getElementById('fDate').value;
+  const meter = document.getElementById('fMeter').value;
+  const usage = parseFloat(document.getElementById('fUsage').value);
+  const msg = document.getElementById('formMsg');
+
+  if(!API_READY){
+    msg.textContent = 'Belum terhubung ke Google Sheet — isi API_URL di file HTML ini dulu.';
+    msg.className = 'form-msg err';
+    return;
+  }
+  if(!date || isNaN(usage)){
+    msg.textContent = 'Isi tanggal dan pemakaian (kWh) dengan benar.';
+    msg.className = 'form-msg err';
+    return;
+  }
+
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.disabled = true; submitBtn.textContent = 'Menyimpan…';
+
+  try{
+    const day = new Date(date + 'T00:00:00').toLocaleDateString('id-ID', {weekday:'long'});
+    const rec = { date, day, meter, usage: Math.round(usage*100)/100 };
+    await saveRecords([rec], true);
+    await loadFromStorage();
+    computeKpis(); render();
+    lastSyncTime = Date.now();
+    msg.textContent = 'Tersimpan ke Google Sheet dan terlihat oleh semua orang.';
+    msg.className = 'form-msg ok';
+    showToast('Pembacaan baru disimpan');
+    setTimeout(()=> overlay.classList.remove('open'), 900);
+  }catch(e){
+    console.error('save failed:', e);
+    msg.textContent = `Gagal menyimpan: ${e && e.message ? e.message : String(e)}`;
+    msg.className = 'form-msg err';
+  }finally{
+    submitBtn.disabled = false; submitBtn.textContent = 'Simpan';
+  }
+});
+
+// ---------- excel import ----------
+const BULAN_ID = {
+  'januari':1,'februari':2,'maret':3,'april':4,'mei':5,'juni':6,
+  'juli':7,'agustus':8,'september':9,'oktober':10,'november':11,'desember':12
+};
+function parseIndoDate(str){
+  if(!str) return null;
+  const s = String(str).trim().toLowerCase();
+  const m = s.match(/(\d{1,2})\s+([a-z]+)\s+(\d{4})/);
+  if(!m) return null;
+  const bulan = BULAN_ID[m[2]];
+  if(!bulan) return null;
+  const dd = String(parseInt(m[1],10)).padStart(2,'0');
+  const mm = String(bulan).padStart(2,'0');
+  return `${m[3]}-${mm}-${dd}`;
+}
+function guessMeterFromSheetName(name){
+  const s = name.toLowerCase();
+  if(s.includes('meteran 2') || s.includes('meteran2')) return 'Meteran 2';
+  return 'Meteran 1';
+}
+function parseWorkbook(workbook){
+  const found = [];
+  workbook.SheetNames.forEach(sheetName=>{
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+    const meter = guessMeterFromSheetName(sheetName);
+    rows.forEach(row=>{
+      if(!row || row.length < 3) return;
+      // find a cell in this row that looks like an Indonesian date
+      let isoDate = null, dateColIdx = -1;
+      for(let i=0;i<Math.min(row.length,6);i++){
+        const d = parseIndoDate(row[i]);
+        if(d){ isoDate = d; dateColIdx = i; break; }
+      }
+      if(!isoDate) return;
+      // usage = last numeric cell in the row, excluding the date column itself
+      let usage = null;
+      for(let i=row.length-1;i>dateColIdx;i--){
+        const v = row[i];
+        if(typeof v === 'number' && isFinite(v)){ usage = v; break; }
+      }
+      if(usage === null) return;
+      const day = new Date(isoDate+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long'});
+      found.push({ date: isoDate, day, meter, usage: Math.round(usage*100)/100, _sheet: sheetName });
+    });
+  });
+  // dedupe within the import itself: keep the LAST match per date+meter (later tables in a sheet tend to be the corrected/combined ones)
+  const map = new Map();
+  found.forEach(r=> map.set(r.date+'|'+r.meter, r));
+  return [...map.values()].sort((a,b)=> a.date.localeCompare(b.date) || a.meter.localeCompare(b.meter));
+}
+
+let pendingImport = [];
+
+document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('fileInput').click());
+
+document.getElementById('fileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:false});
+    pendingImport = parseWorkbook(wb);
+
+    const overlay = document.getElementById('importOverlay');
+    const summary = document.getElementById('importSummary');
+    const previewWrap = document.getElementById('importPreview');
+    const body = document.getElementById('importPreviewBody');
+    const msg = document.getElementById('importMsg');
+    msg.textContent = ''; msg.className = 'form-msg';
+
+    if(pendingImport.length === 0){
+      summary.innerHTML = `Tidak ada baris yang bisa dikenali dari <b>${file.name}</b>. Pastikan ada kolom tanggal (mis. "13 Juli 2026") dan kolom pemakaian kWh berupa angka.`;
+      previewWrap.style.display = 'none';
+      document.getElementById('importConfirmBtn').disabled = true;
+    } else {
+      const dates = pendingImport.map(r=>r.date).sort();
+      const m1 = pendingImport.filter(r=>r.meter==='Meteran 1').length;
+      const m2 = pendingImport.filter(r=>r.meter==='Meteran 2').length;
+      summary.innerHTML = `Ditemukan <b>${pendingImport.length} pembacaan</b> dari <b>${file.name}</b> (${dates[0]} – ${dates[dates.length-1]})<br>Meteran 1: ${m1} · Meteran 2: ${m2}`;
+      body.innerHTML = pendingImport.map(r=>`<tr>
+          <td style="padding:5px 8px; border-top:1px solid var(--border);">${r.date}</td>
+          <td style="padding:5px 8px; border-top:1px solid var(--border);">${r.meter}</td>
+          <td style="padding:5px 8px; border-top:1px solid var(--border);">${r.usage}</td>
+        </tr>`).join('');
+      previewWrap.style.display = 'block';
+      document.getElementById('importConfirmBtn').disabled = false;
+    }
+    overlay.classList.add('open');
+  }catch(err){
+    console.error(err);
+    showToast('Gagal membaca file Excel');
+  }
+});
+
+document.getElementById('importCancelBtn').addEventListener('click', ()=>{
+  document.getElementById('importOverlay').classList.remove('open');
+  pendingImport = [];
+});
+
+document.getElementById('importConfirmBtn').addEventListener('click', async ()=>{
+  const overwrite = document.getElementById('importOverwrite').checked;
+  const msg = document.getElementById('importMsg');
+  const btn = document.getElementById('importConfirmBtn');
+
+  if(!API_READY){
+    msg.textContent = 'Belum terhubung ke Google Sheet — isi API_URL di file HTML ini dulu.';
+    msg.className = 'form-msg err';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Mengimpor…';
+  try{
+    await loadFromStorage(); // get latest for an accurate added/updated count
+    let added = 0, updated = 0, skipped = 0;
+    pendingImport.forEach(rec=>{
+      const exists = raw.some(r=> r.date===rec.date && r.meter===rec.meter);
+      if(!exists) added++;
+      else if(overwrite) updated++;
+      else skipped++;
+    });
+
+    const toSend = overwrite ? pendingImport : pendingImport.filter(rec=>
+      !raw.some(r=> r.date===rec.date && r.meter===rec.meter));
+
+    await saveRecords(toSend, overwrite);
+    await loadFromStorage();
+    computeKpis(); render();
+    lastSyncTime = Date.now();
+    msg.textContent = `Impor selesai: ${added} baru, ${updated} diperbarui, ${skipped} dilewati.`;
+    msg.className = 'form-msg ok';
+    showToast('Impor Excel berhasil');
+    setTimeout(()=>{
+      document.getElementById('importOverlay').classList.remove('open');
+      pendingImport = [];
+    }, 1400);
+  }catch(err){
+    console.error('Import failed:', err);
+    msg.textContent = `Gagal mengimpor: ${err && err.message ? err.message : String(err)}. Coba klik Impor sekali lagi.`;
+    msg.className = 'form-msg err';
+  }finally{
+    btn.disabled = false; btn.textContent = 'Impor';
+  }
+});
+
+// ---------- init ----------
+(async function init(){
+  if(!API_READY){
+    document.querySelector('.note').innerHTML =
+      '⚠️ Dashboard ini belum terhubung ke Google Sheet. Buka file HTML ini di editor teks, ' +
+      'cari baris <code>const API_URL = \'\';</code> dekat awal tag &lt;script&gt;, dan isi dengan URL ' +
+      'Web App Apps Script Anda (diakhiri /exec). Lihat panduan setup yang menyertai file ini.';
+    computeKpis();
+    render();
+    return;
+  }
+  try{
+    await loadFromStorage();
+  }catch(e){
+    console.error('initial load failed:', e);
+    document.querySelector('.note').innerHTML =
+      `⚠️ Gagal memuat data dari Google Sheet: ${e.message || e}. Periksa apakah API_URL benar ` +
+      `dan deployment Apps Script sudah "Anyone" access.`;
+  }
+  computeKpis();
+  render();
+  lastSyncTime = Date.now();
+  pollLoop();
+})();
+</script>
+</body>
+</html>
